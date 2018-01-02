@@ -3,11 +3,12 @@
 #include <unistd.h>
 #include <windows.h>
 
-#define PROGRAMNAME "OW_C_launcher"
+#define PROGRAM_NAME "OW_C_launcher"
 #define VERSION "0.1"
-#define PSVERSION "7.1b2" //version of based open_with_windows.py file
+#define PYVERSION "7.1b2" //version of based open_with_windows.py file
+#define GITURL "https://github.com/mbooga/owclauncher"
 
-#define BUFFER_SIZE 2048 //in bytes
+#define BUFFER_SIZE 4096 //in bytes
 #define MAXEVLEN 512 
 
 char* programpath;
@@ -19,7 +20,7 @@ void removeMOZ() {
     char sbuffer[MAXEVLEN];
 	char *s;
     int i = 0, j, envlen = 0;
-	//reverse iteration of the environemnt variable list
+    //backward iteration of the environemnt variable list
     //to properly unset (delete) unwanted elements
     while (environ[i]) {
         i++;
@@ -44,12 +45,66 @@ void removeMOZ() {
     }
 }
 
+//A simple function to process the json message sent by the browser
+//as of v7.1b2 of open with, passing (") (Double quote) character in command text is buggy
+//it is basically ignored !
+//the launcher will try to determine if it was used in the command text
 int processJson(char* buffer, char* command) {
-    int i =0,j = 0;
+    int i =0, j = 0, latestquotesi =0, latestquotesj = 0;
+    int insidequotes = 0, usedoublequotes =0;
     char c = buffer[0];
     while (c!='\0') {
-        if ((c=='\"') || (c=='[') || (c ==']')) {
+        if ((c=='[') || (c ==']')) {
+            if (insidequotes) {
+                command[j] = c;
+                i += 1;
+                j += 1;
+            } else {
+                i += 1;
+            }
+        } else if (c=='\"') {
+            if (!insidequotes) {
+                latestquotesi = i;
+                latestquotesj = j;
+                insidequotes = 1;
+                usedoublequotes = 0;
+                i += 1;
+            } else {
+                if (usedoublequotes) {
+                    command[j] = c;
+                    j += 1;
+                }
+                i += 1;
+                insidequotes = 0;
+                usedoublequotes =0;
+            }
+        } else if (c == ',') {
+            if (insidequotes) {
+                command[j] = c;
+            } else {
+                command[j] = ' ';
+            }
             i += 1;
+            j += 1;
+        } else if (c == ' ') {
+            if (insidequotes) {
+                if (usedoublequotes) {
+                    command[j] = c;
+                    i += 1;
+                    j += 1;
+                } else {
+                    i = latestquotesi;
+                    j = latestquotesj;
+                    usedoublequotes = 1;
+                    command[j] = '\"';
+                    i += 1;
+                    j += 1;
+                }
+            } else {
+                command[j] = c;
+                i += 1;
+                j += 1;
+            }
         } else if (c=='\\'){
             if ((i<BUFFER_SIZE-1) && (buffer[i+1] == '\\')) {
                 command[j] = '\\';
@@ -58,10 +113,6 @@ int processJson(char* buffer, char* command) {
             } else {
                 i += 1;
             }
-        } else if (c == ','){
-            command[j] = ' ';
-            i += 1;
-            j += 1;
         } else {
             command[j] = c;
             i += 1;
@@ -130,7 +181,7 @@ int execute(char* buffer) {
 int sendPing(char* buffer) {
     int32_t msgLen;
     msgLen = snprintf(buffer, BUFFER_SIZE,
-                 "{\"version\": \"%s_%s_%s\", \"file\": \"", PSVERSION, PROGRAMNAME, VERSION);
+                 "{\"version\": \"%s_%s_%s\", \"file\": \"", PYVERSION, PROGRAM_NAME, VERSION);
     int i=0;
     while (msgLen<BUFFER_SIZE-3 && (programpath[i]!='\0')) {
         if (programpath[i] == '\\') {
@@ -195,22 +246,20 @@ int listenToBrowser() {
 
 int main(int argc, char **argv)
 {
-	if (argc < 2) {
-		return -1;
-	}
-
     int i =0, j =0;
     const char* allowed[] = {
             "openwith@darktrojan.net",
             "chrome-extension://cogjlncmljjnjpbgppagklanlcbchlno/",
             "chrome-extension://fbmcaggceafhobjkhnaakhgfmdaadhhg/",};
 
-	for (i=0; i<3; i++) {
-		if (strcmp(allowed[i], argv[1])==0) {
-			j = 1;
-			break;
-		}
-	}
+    if (argc >1) {
+        for (i=0; i<3; i++) {
+            if (strcmp(allowed[i], argv[1])==0) {
+                j = 1;
+                break;
+            }
+        }
+    }
 
     if ((j==0) && argc>2) {
         for (i=0; i<3; i++) {
@@ -222,6 +271,11 @@ int main(int argc, char **argv)
     }
 
     if (j ==0) { //invalid extension !
+        printf("%s v%s\n\nA Native Messaging Host (aka Launcher) for \"open with\""
+               " add-on, based on v%s of open-with-windows.py\n",
+               PROGRAM_NAME, VERSION, PYVERSION);
+        printf("Source code & Instructions at:\n%s\n", GITURL);
+        getchar();
         return -1;
     }
     programpath = argv[0];
